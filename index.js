@@ -113,7 +113,7 @@ function connectMQTT() {
     username: MQTT_USERNAME,
     password: currentIdToken,
     clientId: 'bmw-bridge-' + Date.now(),
-    clean: false,
+    clean: true,
     protocolVersion: 5,
     reconnectPeriod: 5000,
     connectTimeout: 30000,
