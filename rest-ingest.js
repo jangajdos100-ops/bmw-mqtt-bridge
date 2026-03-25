@@ -75,8 +75,7 @@ async function pollVin(vin, accessToken) {
 
   const json = await res.json();
   const metrics = json.data || {};
-  const snapshotUpdate = { vin, telemetry_timestamp: new Date().toISOString(), data };
-
+const snapshotUpdate = { vin, telemetry_timestamp: new Date().toISOString() };
   for (const [metricKey, metricData] of Object.entries(metrics)) {
     const value = metricData.value;
     if (METRIC_MAP[metricKey]) snapshotUpdate[METRIC_MAP[metricKey]] = value;
