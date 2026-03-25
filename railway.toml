@@ -1,0 +1,17 @@
+[
+build
+]
+builder = "nixpacks"
+
+[[
+services
+]]
+name = "mqtt-bridge"
+startCommand = "node index.js"
+
+[[
+services
+]]
+name = "rest-ingest"
+startCommand = "node rest-ingest.js"
+cronSchedule = "0 */6 * * *"
