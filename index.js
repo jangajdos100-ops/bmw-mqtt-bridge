@@ -22,8 +22,7 @@ const VINS = [
 
 const METRIC_MAP = {
   'vehicle.vehicle.travelledDistance': 'odometer_km',
-  'vehicle.drivetrain.lastRemainingRange': 'range_km',
-  'vehicle.drivetrain.fuelSystem.level': 'fuel_pct',
+  'vehicle.drivetrain.lastRemainingRange': 'range_km',\n  'vehicle.drivetrain.fuelSystem.level': 'fuel_pct',
   'vehicle.chassis.axle.row1.wheel.left.tire.pressure': 'tire_pressure_fl_kpa',
   'vehicle.chassis.axle.row1.wheel.right.tire.pressure': 'tire_pressure_fr_kpa',
   'vehicle.chassis.axle.row2.wheel.left.tire.pressure': 'tire_pressure_rl_kpa',
@@ -99,15 +98,44 @@ function connectMQTT() {
 
   mqttClient.on('connect', () => {
     console.log('MQTT connected!');
+
+    // Diagnostic: wildcard subscribe
+    mqttClient.subscribe('#', { qos: 1 }, (err, granted) => {
+      if (err) {
+        console.error('[DIAG] Wildcard # subscribe ERROR:', err.message);
+      } else {
+        console.log('[DIAG] Wildcard # SUBACK:', JSON.stringify(granted));
+      }
+    });
+
+    // Diagnostic: GCID/# wildcard
+    const gcidWildcard = MQTT_USERNAME + '/#';
+    mqttClient.subscribe(gcidWildcard, { qos: 1 }, (err, granted) => {
+      if (err) {
+        console.error('[DIAG] GCID/# subscribe ERROR:', err.message);
+      } else {
+        console.log('[DIAG] GCID/# SUBACK:', JSON.stringify(granted));
+      }
+    });
+
+    // Exact VIN topics
     VINS.forEach(vin => {
-      mqttClient.subscribe(MQTT_USERNAME + '/' + vin, { qos: 1 }, (err) => {
-        if (err) console.error('Subscribe error for ' + vin + ': ' + err.message);
-        else console.log('Subscribed: ' + vin);
+      const topic = MQTT_USERNAME + '/' + vin;
+      mqttClient.subscribe(topic, { qos: 1 }, (err, granted) => {
+        if (err) {
+          console.error('Subscribe error for ' + vin + ':', err.message);
+        } else {
+          console.log('Subscribed SUBACK ' + vin + ':', JSON.stringify(granted));
+        }
       });
     });
   });
 
   mqttClient.on('message', async (topic, message) => {
+    const ts = new Date().toISOString();
+    console.log('[DIAG] MESSAGE RECEIVED at ' + ts);
+    console.log('[DIAG] Topic:', topic);
+    console.log('[DIAG] Payload:', message.toString());
     try {
       const payload = JSON.parse(message.toString());
       await processPayload(payload);
@@ -145,11 +173,11 @@ async function processPayload(payload) {
     if (METRIC_MAP[metricKey]) snapshotUpdate[METRIC_MAP[metricKey]] = value;
   }
 
-  await supabase.from('vehicle_latest_snapshot').upsert(snapshotUpdate, { onConflict: 'vin' });
+  await supabase.from('vehicle_latest_snapshot').upsert(snapshotUpdate, { onConflict: 'vin'});
   console.log('Processed: ' + vin + ' - ' + Object.keys(data).length + ' metrics');
 }
 
-async function main() {
+apync function main() {
   await refreshToken();
   scheduleTokenRefresh();
   connectMQTT();
