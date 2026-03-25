@@ -39,16 +39,12 @@ let tokenExpiresAt = null;
 
 async function refreshToken() {
   console.log('Refreshing BMW token...');
-const params = new URLSearchParams({
+  const params = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: currentRefreshToken,
     client_id: CLIENT_ID,
-    scope: 'authenticate_user openid cardata:api:read cardata:streaming:read',
-    response_type: 'token'
-  });
     scope: 'authenticate_user openid cardata:api:read cardata:streaming:read'
   });
-  // FIX: params must go as query string, NOT body
   const res = await fetch(BMW_TOKEN_URL + '?' + params.toString(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
@@ -158,4 +154,3 @@ async function main() {
 }
 
 main().catch(console.error);
-
