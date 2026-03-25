@@ -43,12 +43,12 @@ async function refreshToken() {
     grant_type: 'refresh_token',
     refresh_token: currentRefreshToken,
     client_id: CLIENT_ID,
-    response_type: 'token',
     scope: 'authenticate_user openid cardata:api:read cardata:streaming:read'
   });
-  const res = await fetch(BMW_TOKEN_URL + '?' + params.toString(), {
+  const res = await fetch(BMW_TOKEN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
   });
   const json = await res.json();
   if (!json.id_token) throw new Error('Token refresh failed: ' + JSON.stringify(json));
@@ -58,6 +58,7 @@ async function refreshToken() {
   await supabase.from('auth_tokens').upsert({
     gcid: MQTT_USERNAME,
     client_id: CLIENT_ID,
+    access_token_enc: json.access_token,
     id_token_enc: json.id_token,
     refresh_token_enc: json.refresh_token,
     scope: json.scope,
