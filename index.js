@@ -43,6 +43,7 @@ async function refreshToken() {
     grant_type: 'refresh_token',
     refresh_token: currentRefreshToken,
     client_id: CLIENT_ID,
+    response_type: 'token',
     scope: 'authenticate_user openid cardata:api:read cardata:streaming:read'
   });
   const res = await fetch(BMW_TOKEN_URL + '?' + params.toString(), {
