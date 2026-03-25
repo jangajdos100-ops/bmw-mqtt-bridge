@@ -39,15 +39,16 @@ let tokenExpiresAt = null;
 
 async function refreshToken() {
   console.log('Refreshing BMW token...');
-  const res = await fetch(BMW_TOKEN_URL, {
+  const params = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: currentRefreshToken,
+    client_id: CLIENT_ID,
+    scope: 'authenticate_user openid cardata:api:read cardata:streaming:read'
+  });
+  // FIX: params must go as query string, NOT body
+  const res = await fetch(BMW_TOKEN_URL + '?' + params.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: currentRefreshToken,
-      client_id: CLIENT_ID,
-      scope: 'authenticate_user openid cardata:api:read cardata:streaming:read'
-    })
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
   });
   const json = await res.json();
   if (!json.id_token) throw new Error('Token refresh failed: ' + JSON.stringify(json));
@@ -153,4 +154,5 @@ async function main() {
   connectMQTT();
 }
 
+main().catch(console.error);
 main().catch(console.error);
