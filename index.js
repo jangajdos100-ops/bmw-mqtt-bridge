@@ -2,12 +2,10 @@ const mqtt = require('mqtt');
 const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 
-// Supabase
 const SB_URL = process.env.SB_URL;
 const SB_KEY = process.env.SB_KEY;
 const supabase = createClient(SB_URL, SB_KEY);
 
-// BMW MQTT
 const MQTT_HOST = 'customer.streaming-cardata.bmwgroup.com';
 const MQTT_PORT = 9000;
 const MQTT_USERNAME = '23ab99db-701d-4d61-94a0-59ddb23a0b3a';
@@ -36,23 +34,8 @@ const METRIC_MAP = {
 
 let mqttClient = null;
 let currentIdToken = null;
-let currentRefreshToken = null;
+let currentRefreshToken = process.env.BMW_REFRESH_TOKEN;
 let tokenExpiresAt = null;
-
-// --- TOKEN MANAGEMENT ---
-async function loadTokenFromDB() {
-  const { data, error } = await supabase
-    .from('auth_tokens')
-    .select('*')
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .single();
-  if (error || !data) throw new Error('No token in DB: ' + error?.message);
-  currentIdToken = data.id_token_enc;
-  currentRefreshToken = data.refresh_token_enc;
-  tokenExpiresAt = new Date(data.expires_at);
-  console.log('Token loaded, expires:', tokenExpiresAt);
-}
 
 async function refreshToken() {
   console.log('Refreshing BMW token...');
@@ -68,48 +51,40 @@ async function refreshToken() {
   });
   const json = await res.json();
   if (!json.id_token) throw new Error('Token refresh failed: ' + JSON.stringify(json));
-
   currentIdToken = json.id_token;
   currentRefreshToken = json.refresh_token;
   tokenExpiresAt = new Date(Date.now() + json.expires_in * 1000);
-
-  // Uloz do DB
-  await supabase.from('auth_tokens').insert({
+  await supabase.from('auth_tokens').upsert({
     gcid: MQTT_USERNAME,
     client_id: CLIENT_ID,
     id_token_enc: json.id_token,
     refresh_token_enc: json.refresh_token,
     scope: json.scope,
     expires_at: tokenExpiresAt.toISOString(),
-    refresh_expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date().toISOString()
-  });
-  console.log('Token refreshed and saved, expires:', tokenExpiresAt);
+  }, { onConflict: 'gcid' });
+  console.log('Token refreshed, expires:', tokenExpiresAt);
 }
 
 function scheduleTokenRefresh() {
   const msUntilExpiry = tokenExpiresAt - Date.now();
-  const refreshIn = Math.max(msUntilExpiry - 5 * 60 * 1000, 10000); // 5 min pred expiráciou
-  console.log(`Next token refresh in ${Math.round(refreshIn/60000)} minutes`);
+  const refreshIn = Math.max(msUntilExpiry - 5 * 60 * 1000, 10000);
+  console.log('Next token refresh in ' + Math.round(refreshIn/60000) + ' minutes');
   setTimeout(async () => {
     try {
       await refreshToken();
-      // Reconnect MQTT s novym tokenom
-      if (mqttClient) {
-        mqttClient.end(true, () => connectMQTT());
-      }
+      if (mqttClient) mqttClient.end(true, () => connectMQTT());
     } catch (e) {
       console.error('Token refresh error:', e.message);
-      setTimeout(scheduleTokenRefresh, 60000); // retry za 1 min
+      setTimeout(scheduleTokenRefresh, 60000);
     }
     scheduleTokenRefresh();
   }, refreshIn);
 }
 
-// --- MQTT ---
 function connectMQTT() {
   console.log('Connecting to BMW MQTT...');
-  mqttClient = mqtt.connect(`mqtts://${MQTT_HOST}:${MQTT_PORT}`, {
+  mqttClient = mqtt.connect('mqtts://' + MQTT_HOST + ':' + MQTT_PORT, {
     username: MQTT_USERNAME,
     password: currentIdToken,
     clientId: 'bmw-bridge-' + Date.now(),
@@ -123,9 +98,9 @@ function connectMQTT() {
   mqttClient.on('connect', () => {
     console.log('MQTT connected!');
     VINS.forEach(vin => {
-      mqttClient.subscribe(`${MQTT_USERNAME}/${vin}`, { qos: 1 }, (err) => {
-        if (err) console.error(`Subscribe error for ${vin}:`, err.message);
-        else console.log(`Subscribed: ${vin}`);
+      mqttClient.subscribe(MQTT_USERNAME + '/' + vin, { qos: 1 }, (err) => {
+        if (err) console.error('Subscribe error for ' + vin + ': ' + err.message);
+        else console.log('Subscribed: ' + vin);
       });
     });
   });
@@ -142,54 +117,38 @@ function connectMQTT() {
   mqttClient.on('error', (err) => console.error('MQTT error:', err.message));
   mqttClient.on('reconnect', () => console.log('MQTT reconnecting...'));
   mqttClient.on('offline', () => console.log('MQTT offline'));
+  mqttClient.on('close', () => console.log('MQTT connection closed'));
 }
 
-// --- DATA PROCESSING ---
 async function processPayload(payload) {
   const vin = payload.vin;
   const eventTimestamp = payload.timestamp;
   const data = payload.data || {};
-
   const snapshotUpdate = { vin, telemetry_timestamp: eventTimestamp };
 
   for (const [metricKey, metricData] of Object.entries(data)) {
     const value = metricData.value;
     const unit = metricData.unit || null;
     const metricTimestamp = metricData.timestamp || eventTimestamp;
+    const fingerprint = Buffer.from(vin + '|' + metricKey + '|' + metricTimestamp + '|' + value).toString('base64');
 
-    // Fingerprint
-    const fingerprint = Buffer.from(`${vin}|${metricKey}|${metricTimestamp}|${value}`).toString('base64');
-
-    // Insert do vehicle_events
     await supabase.from('vehicle_events').upsert({
-      vin,
-      topic: payload.topic,
-      metric_key: metricKey,
+      vin, topic: payload.topic, metric_key: metricKey,
       metric_value_numeric: typeof value === 'number' ? value : null,
       metric_value_text: typeof value === 'string' ? value : null,
-      unit,
-      event_timestamp: metricTimestamp,
-      payload_json: payload,
-      fingerprint
+      unit, event_timestamp: metricTimestamp,
+      payload_json: payload, fingerprint
     }, { onConflict: 'fingerprint', ignoreDuplicates: true });
 
-    // Mapovanie na snapshot stĺpce
-    if (METRIC_MAP[metricKey]) {
-      snapshotUpdate[METRIC_MAP[metricKey]] = value;
-    }
+    if (METRIC_MAP[metricKey]) snapshotUpdate[METRIC_MAP[metricKey]] = value;
   }
 
-  // Upsert snapshot
-  await supabase.from('vehicle_latest_snapshot').upsert(snapshotUpdate, {
-    onConflict: 'vin'
-  });
-
-  console.log(`Processed: ${vin} - ${Object.keys(data).length} metrics`);
+  await supabase.from('vehicle_latest_snapshot').upsert(snapshotUpdate, { onConflict: 'vin' });
+  console.log('Processed: ' + vin + ' - ' + Object.keys(data).length + ' metrics');
 }
 
-// --- MAIN ---
 async function main() {
-  await loadTokenFromDB();
+  await refreshToken();
   scheduleTokenRefresh();
   connectMQTT();
 }
